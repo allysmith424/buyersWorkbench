@@ -1,118 +1,158 @@
 $(document).ready(function() {
 
-//global vars
+  //global vars
+  var part;
 
+  //jQuery for the Modal
+  $('#myModal').on('shown.bs.modal', function () {
+    $('#myInput').trigger('focus');
+  });
 
-var part;
-
-$('#myModal').on('shown.bs.modal', function () {
-  $('#myInput').trigger('focus');
-});
-
+  //Eventlistener for the part search
   $("#pnSearch").on("click", function(event) {
-
     event.preventDefault();
-
     part = $("#pnInput").val().trim();
-
+    //If part is a valid number, we route address to the specific part
     if (part !== "") {
       window.location.href = "/iteminfo/" + part;
     }
-    d3.selectAll("svg > *").remove();
   });
 
+  // This functions contains all the GET requests and logic to populate the DOM
   var populateInq = function(res){
-
+    //variables to hold the extracted data to calculate the supply/demand
     var pn = res;
     var soTotal="0";
     var poTotal="0";
     var ssTotal="";
     var qohTotal="";
+    /*
+    ---===(Promise Chaining the three GET responses so we can get everything and then calculate the Supply/Demand on a PromiseAll)===---
+    */
+    //Promise for the GET request on Parts
+    var partGet = new Promise(function(resolve, reject){
+      $.ajax("/api/part/" + pn, {
+        type: "GET",
+        error: function() {
+        }
+      }).then(function(result){
+        //Validation if the part Exists.
+        if (result.length ===0) {
+          alert("Aïe! This part doesn't exist!");
+        }else{
+        //Populates the DOM with part info
+        $("#pn").text(result[0].pn);
+        $("#desc").text(result[0].description);
+        $("#rev").text(result[0].rev);
+        $("#buyer").text(result[0].buyer);
+        $("#vendor").text(result[0].vendor);
+        $("#vendorName").text(result[0].vendor_name);
+        $("#type").text(result[0].type);
+        $("#lt_days").text(result[0].lt_days);
+        $("#ord_qty").text(result[0].ord_qty);
+        $("#cost").text(result[0].cost);
+        $("#list").text(result[0].sales_price);
+        $("#qoh").text(result[0].qoh);
+        $("#uom").text(result[0].uom);
+        $("#ss").text(result[0].ss);
+        $("#commited").text(result[0].committed);
 
-    //captures searched part and then clears the input field.
-    $.ajax("/api/part/" + pn, {
-      type: "GET",
-      error: function() {
-      }
-    }).then(function(result){
+        //Pushes current safety stock and QOH, so we can access them for the demand/supply function.
+        ssTotal= result[0].ss;
+        qohTotal= result[0].qoh;
 
-      $("#pn").text(result[0].pn);
-      $("#desc").text(result[0].description);
-      $("#rev").text(result[0].rev);
-      $("#buyer").text(result[0].buyer);
-      $("#vendor").text(result[0].vendor);
-      $("#vendorName").text(result[0].vendor_name);
-      $("#type").text(result[0].type);
-      $("#lt_days").text(result[0].lt_days);
-      $("#ord_qty").text(result[0].ord_qty);
-      $("#cost").text(result[0].cost);
-      $("#list").text(result[0].sales_price);
-      $("#qoh").text(result[0].qoh);
-      $("#uom").text(result[0].uom);
-      $("#ss").text(result[0].ss);
-      $("#commited").text(result[0].committed);
+        //Sets data for the D3 forecast chart.
+        salesData =[
+        {Vendor:'Past 90',Qty: parseInt(result[0].ninety_past)},
+        {Vendor:'Past 60',Qty: parseInt(result[0].sixty_past)},
+        {Vendor:'Past 30',Qty: parseInt(result[0].Thrity_past)},
+        {Vendor:'Current Quater',Qty: parseInt(result[0].current_f)},
+        {Vendor:'Future Quater',Qty: Math.ceil((parseInt(result[0].ninety_past)+parseInt(result[0].sixty_past)+parseInt(result[0].Thrity_past))/3)}
+        ];
 
-      ssTotal= result[0].ss;
-      qohTotal= result[0].qoh;
+        //Loads the D3 Chart.
+        chartload();
 
-      salesData =[
-      {Vendor:'Past 90',Qty: parseInt(result[0].ninety_past)},
-      {Vendor:'Past 60',Qty: parseInt(result[0].sixty_past)},
-      {Vendor:'Past 30',Qty: parseInt(result[0].Thrity_past)},
-      {Vendor:'Current Quater',Qty: parseInt(result[0].current_f)},
-      {Vendor:'Future Quater',Qty: Math.ceil((parseInt(result[0].ninety_past)+parseInt(result[0].sixty_past)+parseInt(result[0].Thrity_past))/3)}
-      ];
-      chartload();
+        //Resolve to fufill the promise.
+        resolve("Parts GET success!");
+        }
+      });
     });
 
-    $.ajax("/api/poLines/" + pn, {
-      type: "GET"
-    }).then(function (result) {
-      $("#poTable").empty();
+    //Promise for the GET request on PO's
+    var poGet = new Promise(function(resolve, reject){
+      $.ajax("/api/poLines/" + pn, {
+        type: "GET"
+      }).then(function (result) {
+        //Clears existing data
+        $("#poTable").empty();
+        //if no PO's exist advise the user with text
+        if (result.length === 0) {
+          var emptyPO= '<td class="table-light" colspan="5"> No Current Purchase Orders</td>';
+          $("#poTable").append(emptyPO);
+          //Pushs Supply Data to variables.
+          poTotal= 0;
+        }else{
+          //If POs are present, append all that match with PN.
+          for (var i = 0; i < result.length; i++){
+            var poLine= "<tr class='table-light'><td>"+result[i].po_number+"</td><td>"+result[i].po_ln+"</td><td>"+result[i].po_vendor+"</td><td>"+result[i].order_qty+"</td><td>"+result[i].due_date+"</td></tr>";
+            $("#poTable").append(poLine);
 
-      if (result.length === 0) {
-        var emptyPO= '<td class="table-light" colspan="5"> No Current Purchase Orders</td>';
-        $("#poTable").append(emptyPO);
-        poTotal= 0;
-      }else{
-        for (var i = 0; i < result.length; i++){
-          var poLine= "<tr class='table-light'><td>"+result[i].po_number+"</td><td>"+result[i].po_ln+"</td><td>"+result[i].po_vendor+"</td><td>"+result[i].order_qty+"</td><td>"+result[i].due_date+"</td></tr>";
-
-          $("#poTable").append(poLine);
-
-          poTotal= parseInt(poTotal) + parseInt(result[i].order_qty);
+            //Pushs Supply Data to variables.
+            poTotal= parseInt(poTotal) + parseInt(result[i].order_qty);
+          }
         }
-      }
+      }).then(function(){
+        //Resolve to fufill the promise
+        resolve("PO GET success!");
+      });
     });
 
-    $.ajax("/api/salesOrders/" + pn, {
-      type: "GET"
-    }).then(function(result) {
-      $("#soTable").empty();
-      if (result.length === 0) {
-        var empty= '<td class="table-light" colspan="5"> No Current Sales Orders</td>';
-        $("#soTable").append(empty);
-        soTotal= 0;
-      }
-      else{
-        for (var i = 0; i < result.length; i++) {
-          var soLine= "<tr class='table-light'><td>"+result[i].so_num+"</td><td>"+result[i].so_ln+"</td><td>"+result[i].customer+"</td><td>"+result[i].order_qty+"</td><td>"+result[i].due_date+"</td></tr>";
-          $("#soTable").append(soLine);
-
-        $("#tDemand").text(parseInt(soTotal)+parseInt(ssTotal));
-        $("#tSupply").text(parseInt(poTotal)+parseInt(qohTotal));
-        $("#ordQty").text((parseInt(soTotal)+parseInt(ssTotal))-(parseInt(poTotal)+parseInt(qohTotal)));
-
+    //Promise for the GET request on SOs
+    var soGet = new Promise(function(resolve, reject){
+      $.ajax("/api/salesOrders/" + pn, {
+        type: "GET"
+      }).then(function(result) {
+        $("#soTable").empty();
+        //if no SOs exist advise the user with text
+        if (result.length === 0) {
+          var empty= '<td class="table-light" colspan="5"> No Current Sales Orders</td>';
+          $("#soTable").append(empty);
+          //Pushs Demand Data to variables.
+          soTotal= 0;
         }
-      }
+        else{
+          //If SOs are present, append all that match with PN.
+          for (var i = 0; i < result.length; i++) {
+            //Pushs Demand Data to variables.
+            soTotal= parseInt(soTotal) + parseInt(result[i].order_qty);
+            var soLine= "<tr class='table-light'><td>"+result[i].so_num+"</td><td>"+result[i].so_ln+"</td><td>"+result[i].customer+"</td><td>"+result[i].order_qty+"</td><td>"+result[i].due_date+"</td></tr>";
+            $("#soTable").append(soLine);
+          }
+        }
+      }).then(function(){
+        //Resolve to fufill the promise.
+        resolve("SO GET success!");
+      });
+    });
+
+    //Once all promise callbacks are varified, run the supply/supply demand function, as the extracted data should be present.
+    Promise.all([partGet, poGet, soGet]).then(function() {
+      $("#tDemand").text(parseInt(soTotal)+parseInt(ssTotal));
+      $("#tSupply").text(parseInt(poTotal)+parseInt(qohTotal));
+      $("#ordQty").text((parseInt(soTotal)+parseInt(ssTotal))-(parseInt(poTotal)+parseInt(qohTotal)));
     });
   };
 
+  /*---===On page load logic===---*/
+
+  //extracts the part number from the address.
   var url = window.location.href;
   var parsedUrl = url.split("/");
   part = parsedUrl[parsedUrl.length - 1];
 
-  if (part === "iteminfo" || part === "itemInfo") {
+  //This statement verifies what part to search via the address. If a part is present it will return that part. If the address is just to the root, we will display 17922, the first existing part in our DB.
+  if (part === "iteminfo" || part === "itemInfo" || part ==="") {
     populateInq("17922");
   }
   else {
@@ -121,25 +161,26 @@ $('#myModal').on('shown.bs.modal', function () {
 
 });
 
-  var salesData;
+/*---===D3 logic for Forecast Graph and overview graph in dropdown/modal===---*/
 
-  var svg=d3.select("svg");
+//Logic for the Forecast graph. Invoked in the partGet callback via chartload.
+var salesData;
+var svg=d3.select("svg");
+var padding={top: 20, right: 30, bottom: 30, left: 50};
+var colors=d3.schemeCategory20c;
 
-  var padding={top: 20, right: 30, bottom: 30, left: 50};
-
-  var colors=d3.schemeCategory20c;
 var chartload = function(){
   var chartArea={
     "width":parseInt(svg.style("width"))-padding.left-padding.right,
     "height":parseInt(svg.style("height"))-padding.top-padding.bottom};
   var yScale = d3.scaleLinear()
-    .domain([0, d3.max(salesData, function(d, i){return d.Qty})])
+    .domain([0, d3.max(salesData, function(d, i){return d.Qty;})])
     .range([chartArea.height, 0]).nice();
 
   var xScale = d3.scaleBand()
-    .domain(salesData.map(function(d) {return d.Vendor}))
+    .domain(salesData.map(function(d) {return d.Vendor;}))
     .range([0, chartArea.width])
-    .padding(.2);
+    .padding(0.2);
 
   var xAxis=svg.append("g")
     .classed("xAxis", true)
@@ -186,17 +227,13 @@ var chartload = function(){
     });
 };
 
+
+//Logic for the Vendor Outlook graph.
 var freqData=[
-{Vendor:'Mac Book',freq:{Quarter1:4786, Quarter2:1319, Quarter3:249}}
-,{Vendor:'EA',freq:{Quarter1:1101, Quarter2:412, Quarter3:674}}
-,{Vendor:'Apple',freq:{Quarter1:932, Quarter2:2149, Quarter3:418}}
-,{Vendor:'Dell',freq:{Quarter1:832, Quarter2:1152, Quarter3:1862}}
-// ,{Vendor:'FL',freq:{Quarter1:4481, Quarter2:3304, Quarter3:948}}
-// ,{Vendor:'GA',freq:{Quarter1:1619, Quarter2:167, Quarter3:1063}}
-// ,{Vendor:'IA',freq:{Quarter1:1819, Quarter2:247, Quarter3:1203}}
-// ,{Vendor:'IL',freq:{Quarter1:4498, Quarter2:3852, Quarter3:942}}
-// ,{Vendor:'IN',freq:{Quarter1:797, Quarter2:1849, Quarter3:1534}}
-// ,{Vendor:'KS',freq:{Quarter1:162, Quarter2:379, Quarter3:471}}
+{Vendor:'Mac Book',freq:{Quarter1:4786, Quarter2:1319, Quarter3:249}},
+{Vendor:'EA',freq:{Quarter1:1101, Quarter2:412, Quarter3:674}},
+{Vendor:'Apple',freq:{Quarter1:932, Quarter2:2149, Quarter3:418}},
+{Vendor:'Dell',freq:{Quarter1:832, Quarter2:1152, Quarter3:1862}}
 ];
 
 dashboard('#dashboard',freqData);
@@ -212,7 +249,7 @@ function dashboard(id, fData){
     // function to handle histogram.
     function histoGram(fD){
         var hG={},    hGDim = {t: 60, r: 0, b: 30, l: 0};
-        hGDim.w = 500 - hGDim.l - hGDim.r,
+        hGDim.w = 500 - hGDim.l - hGDim.r;
         hGDim.h = 300 - hGDim.t - hGDim.b;
 
         //create svg for histogram.
@@ -249,7 +286,7 @@ function dashboard(id, fData){
             .on("mouseout",mouseout);// mouseout is defined below.
 
         //Create the frequency labels above the rectangles.
-        bars.append("text").text(function(d){ return d3.format(",")(d[1])})
+        bars.append("text").text(function(d){ return d3.format(",")(d[1]);})
             .attr("x", function(d) { return x(d[0])+x.rangeBand()/2; })
             .attr("y", function(d) { return y(d[1])-5; })
             .attr("text-anchor", "middle");
@@ -286,9 +323,9 @@ function dashboard(id, fData){
 
             // transition the frequency labels location and change value.
             bars.select("text").transition().duration(500)
-                .text(function(d){ return d3.format(",")(d[1])})
+                .text(function(d){ return d3.format(",")(d[1]);})
                 .attr("y", function(d) {return y(d[1])-5; });
-        }
+        };
         return hG;
     }
 
@@ -318,7 +355,7 @@ function dashboard(id, fData){
         pC.update = function(nD){
             piesvg.selectAll("path").data(pie(nD)).transition().duration(500)
                 .attrTween("d", arcTween);
-        }
+        };
         // Utility function to be called on mouseover a pie slice.
         function mouseover(d){
             // call the update function of histogram with new data.
@@ -377,7 +414,7 @@ function dashboard(id, fData){
 
             // update the percentage column.
             l.select(".legendPerc").text(function(d){ return getLegend(d,nD);});
-        }
+        };
 
         function getLegend(d,aD){ // Utility function to compute percentage.
             return d3.format("%")(d.freq/d3.sum(aD.map(function(v){ return v.freq; })));
